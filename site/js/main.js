@@ -272,7 +272,7 @@
   if (playToggle) playToggle.addEventListener('click', function () { resumeAfterHold = playing; });
 })();
 
-// A team member's portrait for the Team page, the journey stops and the
+// A team member's portrait for the Team page, its department sections and the
 // consultation cards. `kind` is 'photo' (the big portrait), 'thumb' (small
 // square) or 'card' (5:4). Someone whose photo hasn't arrived yet (blank in
 // team-data.js) gets a plain silhouette, so no page ever shows a broken image.
@@ -310,14 +310,13 @@
   var bioEl = document.getElementById('team-bio');
   var nameEl = document.getElementById('team-active-name');
   var roleEl = document.getElementById('team-active-role');
-  var progressEl = document.getElementById('team-progress');
   var prevBtn = document.getElementById('team-prev');
   var nextBtn = document.getElementById('team-next');
   var liveEl = document.getElementById('team-live');
   var viewMoreBtn = document.getElementById('team-view-more');
-  var depEl = document.getElementById('team-dep');
+  var chipsEl = document.getElementById('team-chips');
   var askEl = document.getElementById('team-ask');
-  var stops = [].slice.call(document.querySelectorAll('.team-stop'));
+  var deptCards = {}; // the "Our departments" cards, by department name (built below)
 
   var count = members.length;
   var activeIndex = 0;
@@ -362,6 +361,31 @@
   members.forEach(function (member, i) { strip.appendChild(buildCard(member, i, true)); });
 
   var cards = strip.querySelectorAll('.team-card');
+
+  // Department chips above the strip: one per department, in the order the
+  // team is listed; a chip jumps the strip to the first person in it, and the
+  // current person's department is the one filled in.
+  var chips = [];
+  if (chipsEl) {
+    members.forEach(function (member, i) {
+      var dep = member.department;
+      if (!dep || chips.some(function (c) { return c.getAttribute('data-dep') === dep; })) return;
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'team-chip';
+      chip.setAttribute('data-dep', dep);
+      chip.setAttribute('aria-pressed', 'false');
+      chip.textContent = dep;
+      chip.addEventListener('click', function () { goTo(i); });
+      chipsEl.appendChild(chip);
+      chips.push(chip);
+    });
+  }
+
+  // Clicking a photo in the strip brings that person to the front.
+  cards.forEach(function (card, k) {
+    card.addEventListener('click', function () { goTo(k % count); });
+  });
   var pos = 0; // leftmost card's position in the strip, 0 .. 2 * count - 1
 
   function pad(n) { return n < 10 ? '0' + n : String(n); }
@@ -410,17 +434,22 @@
   function renderInfo(index, silent) {
     var member = members[index];
 
-    progressEl.style.transition = silent ? 'none' : '';
-    progressEl.style.width = (100 / count) + '%';
-    progressEl.style.transform = 'translateX(' + (index * 100) + '%)';
 
     counterEl.textContent = pad(index + 1) + ' / ' + pad(count);
-    crossfadeText([nameEl, roleEl, bioEl, depEl, askEl],
-      [member.name, member.role, member.shortBio, member.department || '', member.helpsWith || ''], silent);
-    stops.forEach(function (stop) {
-      var on = stop.getAttribute('data-dep') === member.department;
-      stop.classList.toggle('is-on', on);
-      stop.setAttribute('aria-pressed', on ? 'true' : 'false');
+    crossfadeText([nameEl, roleEl, bioEl, askEl],
+      [member.name, member.role, member.shortBio, member.helpsWith || ''], silent);
+    chips.forEach(function (chip) {
+      var on = chip.getAttribute('data-dep') === member.department;
+      chip.classList.toggle('is-active', on);
+      chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+      // on phones the chips are one row to swipe: keep the current one in view
+      if (on && chipsEl.scrollWidth > chipsEl.clientWidth) {
+        var left = chip.offsetLeft - (chipsEl.clientWidth - chip.offsetWidth) / 2;
+        chipsEl.scrollTo({ left: Math.max(0, left), behavior: silent ? 'auto' : 'smooth' });
+      }
+    });
+    Object.keys(deptCards).forEach(function (dept) {
+      deptCards[dept].classList.toggle('is-current', dept === (member.department || ''));
     });
 
     liveEl.textContent = member.name + ', ' + member.role;
@@ -490,36 +519,63 @@
     window.setTimeout(finishSlide, ANIM_MS);
   }
 
-  // "Who you'll meet along the way": each stop lists the people in its
-  // department; clicking one slides the team strip to the first of them.
-  stops.forEach(function (stop) {
-    // a stop can cover several departments: data-dep="One|Another"
-    var deps = stop.getAttribute('data-dep').split('|');
-    var who = members.filter(function (m) { return deps.indexOf(m.department) > -1; });
-    if (!who.length) { stop.parentNode.hidden = true; return; }
-    stop.querySelector('.team-stop-who').textContent = who.map(function (m) { return m.name; }).join(', ');
-    var faces = stop.querySelector('.team-stop-faces');
-    who.slice(0, 3).forEach(function (m) {
-      var img = document.createElement('img');
-      img.src = window.teamPortrait(m, 'thumb');
-      img.alt = '';
-      img.width = 36; img.height = 36;
-      img.loading = 'lazy';
-      faces.appendChild(img);
-    });
-    stop.addEventListener('click', function () {
-      goTo(members.indexOf(who[0]));
-      // If the strip has scrolled out of view above, bring it back so the
-      // change can be seen (clear of the sticky header).
-      var header = document.querySelector('.site-header');
-      var offset = header ? header.getBoundingClientRect().height + 16 : 16;
-      var top = section.querySelector('.team-slider-head').getBoundingClientRect().top;
-      if (top < offset) {
-        var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        window.scrollTo({ top: window.pageYOffset + top - offset, behavior: reduce ? 'auto' : 'smooth' });
+  // "Our departments": a card for each department, in the order its people
+  // first appear in team-data.js, listing its people. Choosing a person opens
+  // their bio, the same one as "View more". The card for the person showing
+  // in the slider is marked (renderInfo).
+  var deptList = document.getElementById('team-depts');
+  if (deptList) {
+    var depts = [];
+    var byDept = {};
+    members.forEach(function (m) {
+      var dept = m.department || '';
+      if (!byDept[dept]) {
+        byDept[dept] = [];
+        depts.push(dept);
       }
+      byDept[dept].push(m);
     });
-  });
+    var add = function (tag, className, text) {
+      var node = document.createElement(tag);
+      node.className = className;
+      if (text != null) node.textContent = text;
+      return node;
+    };
+    depts.forEach(function (dept, i) {
+      var people = byDept[dept];
+      var item = add('li', 'team-dept');
+      var head = add('div', 'team-dept-head');
+      head.appendChild(add('span', 'team-dept-num', pad(i + 1)));
+      head.appendChild(add('h3', 'team-dept-name', dept));
+      head.appendChild(add('span', 'team-dept-count', people.length + (people.length === 1 ? ' person' : ' people')));
+      item.appendChild(head);
+      var list = add('ul', 'team-dept-people');
+      people.forEach(function (m) {
+        var btn = add('button', 'team-dept-person');
+        btn.type = 'button';
+        btn.setAttribute('aria-label', m.name + ', ' + m.role + '. Read more');
+        var img = document.createElement('img');
+        img.src = window.teamPortrait(m, 'thumb');
+        img.alt = '';
+        img.width = 52;
+        img.height = 52;
+        img.loading = 'lazy';
+        btn.appendChild(img);
+        var text = add('span', 'team-dept-person-text');
+        text.appendChild(add('span', 'team-dept-person-name', m.name));
+        text.appendChild(add('span', 'team-dept-person-role', m.role));
+        btn.appendChild(text);
+        btn.addEventListener('click', function () { openModal(m, btn); });
+        var li = document.createElement('li');
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+      item.appendChild(list);
+      deptList.appendChild(item);
+      deptCards[dept] = item;
+    });
+    deptList.closest('section').hidden = false;
+  }
 
   nextBtn.addEventListener('click', next);
   prevBtn.addEventListener('click', prev);
@@ -600,8 +656,11 @@
     }
   }
 
-  function openModal() {
-    var member = members[activeIndex];
+  // the bio of `member` (from the department sections), else of whoever the
+  // slider is showing; closing it goes back to `trigger`, the button that
+  // opened it (a mouse click does not focus a button in every browser)
+  function openModal(member, trigger) {
+    if (!member || !member.name) member = members[activeIndex];
     modalName.textContent = member.name;
     modalRole.textContent = member.role;
     modalPhoto.src = window.teamPortrait(member, 'photo');
@@ -622,7 +681,7 @@
     });
 
     window.clearTimeout(hideTimer);
-    lastFocused = document.activeElement;
+    lastFocused = trigger || document.activeElement;
     overlay.hidden = false;
     document.body.style.overflow = 'hidden';
     window.requestAnimationFrame(function () { overlay.classList.add('is-open'); });
@@ -638,7 +697,7 @@
     if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
   }
 
-  viewMoreBtn.addEventListener('click', openModal);
+  viewMoreBtn.addEventListener('click', function () { openModal(members[activeIndex], viewMoreBtn); });
   modalClose.addEventListener('click', closeModal);
   overlay.addEventListener('click', function (event) {
     if (event.target === overlay) closeModal();
@@ -1556,62 +1615,222 @@ function createCursorFollower(options) {
   });
 })();
 
-// Home page: the "What people say" section, fed by js/testimonials-data.js.
+// Home page: the testimonials, fed by js/testimonials-data.js: a card for each
+// student, side by side in a row (three across on a laptop, two on a tablet,
+// one on a phone). When there are more than fit, the row scrolls sideways
+// (a swipe, a trackpad, or the arrow keys once it has focus) and the dots
+// below appear, one for each place it can stop; the current one is longer.
+// It never moves on its own, so nobody loses their place while reading.
 //
 // Real quotes are always shown. Entries marked `sample: true` are stand-ins for
 // reviewing the design: they show only on a developer's own copy (a file, or
 // localhost) or when ?testimonialsPreview is added to the address, and never on
-// a real website address — so a forgotten sample can't reach visitors. With
+// a real website address, so a forgotten sample can't reach visitors. With
 // nothing to show, the section stays hidden. An incomplete entry (no quote or
 // no name) is skipped rather than shown half-empty.
+//
+// A student who gave a rating gets a rating box on their card: their own
+// score, beside the average of the ratings on show once there are two or more.
 (function () {
   'use strict';
 
   var section = document.getElementById('testimonials');
-  var grid = document.getElementById('testimonial-grid');
+  var row = document.getElementById('testimonial-row');
+  var dotsBox = document.getElementById('testimonial-dots');
   var all = window.TESTIMONIALS;
-  if (!section || !grid || !all || !all.length) return;
+  if (!section || !row || !dotsBox || !all || !all.length) return;
 
   var here = window.location;
   var ownCopy = here.protocol === 'file:' || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(here.hostname);
   var allowSamples = ownCopy || /[?&]testimonialsPreview(=|&|$)/.test(here.search);
 
-  var quoteIcon = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#FFB800" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-bottom:16px;"><path d="M9.5 7C7 8 5.5 10 5.5 13v4h5v-5h-2.2c0-1.6.9-2.7 2.2-3.4L9.5 7Zm8 0c-2.5 1-4 3-4 6v4h5v-5h-2.2c0-1.6.9-2.7 2.2-3.4L17.5 7Z"/></svg>';
+  var people = all.filter(function (t) {
+    return t && t.quote && t.name && (!t.sample || allowSamples);
+  });
+  if (!people.length) return;
 
-  function add(tag, className, text) {
+  var STAR = '<svg class="testi-star" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"/></svg>';
+  var MARK = '<svg class="testi-mark" viewBox="0 0 27 19" width="44" height="31" aria-hidden="true"><path d="M1.5 12.5C1.5 7 5 3 10.5 1.5l.7 2.1C8 4.8 6 6 5.6 7.2a5.5 5.5 0 1 1-4.1 5.3z"/><path d="M15.5 12.5C15.5 7 19 3 24.5 1.5l.7 2.1C22 4.8 20 6 19.6 7.2a5.5 5.5 0 1 1-4.1 5.3z"/></svg>';
+
+  function el(tag, className, text) {
     var node = document.createElement(tag);
-    node.className = className;
-    node.textContent = text;
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
     return node;
   }
 
-  var shown = 0;
+  // a score out of 5 (from 1); anything else is left out
+  function ratingOf(t) {
+    var r = typeof t.rating === 'number' ? t.rating : parseFloat(t.rating);
+    return r >= 1 && r <= 5 ? r : null;
+  }
+
+  // 5 -> "5.0", 4.5 -> "4.5", 4.8333 -> "4.83"
+  function score(r) {
+    return (Math.round(r * 100) / 100).toFixed(2).replace(/0$/, '');
+  }
+
+  function initials(name) {
+    var words = String(name).trim().split(/\s+/);
+    var last = words.length > 1 ? words[words.length - 1].charAt(0) : '';
+    return (words[0].charAt(0) + last).toUpperCase();
+  }
+
+  // "Wanjiru's rating", or "A. Wanjiru's rating" when the first name is only an initial
+  function ratingLabel(name) {
+    var first = String(name).trim().split(/\s+/)[0];
+    return (first.length > 1 && first.indexOf('.') === -1 ? first : name) + '’s rating';
+  }
+
+  function scoreBlock(className, value, label, star) {
+    var block = el('div', className);
+    var num = el('p', 'testi-score-num');
+    if (star) num.innerHTML = STAR;
+    num.appendChild(document.createTextNode(value));
+    num.appendChild(el('span', 'sr-only', ' out of 5'));
+    block.appendChild(num);
+    block.appendChild(el('p', 'testi-score-label', label));
+    return block;
+  }
+
+  var rated = [];
+  people.forEach(function (t) {
+    var r = ratingOf(t);
+    if (r !== null) rated.push(r);
+  });
+  var average = rated.length > 1 ? rated.reduce(function (a, b) { return a + b; }, 0) / rated.length : null;
+
   var samples = 0;
-  all.forEach(function (t) {
-    if (!t || !t.quote || !t.name) return;
-    if (t.sample && !allowSamples) return;
-    var card = document.createElement('article');
-    card.className = 'testimonial-card' + (t.sample ? ' is-sample' : '');
+
+  people.forEach(function (t) {
+    var card = el('li', 'testi-card');
     if (t.sample) {
-      card.appendChild(add('span', 'testimonial-sample', 'Sample: replace before launch'));
+      card.appendChild(el('span', 'testi-sample', 'Sample: replace before launch'));
       samples++;
     }
-    card.insertAdjacentHTML('beforeend', quoteIcon);
-    card.appendChild(add('p', 'testimonial-quote', '“' + t.quote + '”'));
-    card.appendChild(add('div', 'testimonial-meta', t.name));
-    if (t.detail) card.appendChild(add('div', 'testimonial-role', t.detail));
-    grid.appendChild(card);
-    shown++;
+
+    // who they are
+    var person = el('div', 'testi-person');
+    var avatar = el('span', 'testi-avatar');
+    avatar.setAttribute('aria-hidden', 'true');
+    if (t.photo) {
+      var img = document.createElement('img');
+      img.src = t.photo;
+      img.alt = '';
+      img.width = 64;
+      img.height = 64;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      avatar.appendChild(img);
+    } else {
+      avatar.textContent = initials(t.name);
+    }
+    person.appendChild(avatar);
+    var who = el('div', 'testi-who');
+    who.appendChild(el('p', 'testi-name', 'Meet ' + t.name));
+    if (t.detail) who.appendChild(el('p', 'testi-detail', t.detail));
+    person.appendChild(who);
+    card.appendChild(person);
+
+    // their rating, pressed in, beside the average
+    var own = ratingOf(t);
+    if (own !== null) {
+      var scores = el('div', 'testi-score');
+      if (average !== null) scores.appendChild(scoreBlock('testi-score-avg', score(average), 'Average', false));
+      scores.appendChild(scoreBlock('testi-score-own', score(own), ratingLabel(t.name), true));
+      card.appendChild(scores);
+    }
+
+    // their words
+    var quote = el('blockquote', 'testi-quote');
+    quote.insertAdjacentHTML('beforeend', MARK);
+    quote.appendChild(el('p', 'testi-quote-lead', t.quote));
+    if (t.story) quote.appendChild(el('p', 'testi-quote-more', t.story));
+    card.appendChild(quote);
+
+    row.appendChild(card);
   });
-  if (!shown) return;
 
   if (samples) {
-    var note = add('p', 'consult-preview', 'Sample quotes are showing so you can review the layout. Visitors on the live site will not see them: replace them with real quotes in js/testimonials-data.js before you deploy.');
-    note.style.margin = '0 auto 24px';
-    note.style.maxWidth = '640px';
-    grid.parentNode.insertBefore(note, grid);
+    var note = el('p', 'consult-preview testi-preview', 'Sample quotes are showing so you can review the layout. Visitors on the live site will not see them: replace them with real quotes in js/testimonials-data.js before you deploy.');
+    row.parentNode.insertBefore(note, row);
   }
   section.hidden = false;
+
+  // The places the row can stop, with a dot for each: the start of every
+  // card, but never past the end of the row. So three cards on a laptop, all
+  // in view, give one place and no dots; five give three.
+  var cards = Array.prototype.slice.call(row.children);
+  var stops = [];
+  var dots = [];
+  var current = -1;
+  var still = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+  function measure() {
+    var pad = parseFloat(getComputedStyle(row).paddingLeft) || 0;
+    var end = row.scrollWidth - row.clientWidth;
+    var found = [];
+    cards.forEach(function (card, i) {
+      var at = Math.max(0, Math.min(Math.round(card.offsetLeft - pad), end));
+      if (!found.length || at - found[found.length - 1].at > 2) found.push({ at: at, name: people[i].name });
+    });
+    stops = found;
+    if (dots.length !== stops.length) {
+      dotsBox.textContent = '';
+      dots = stops.map(function (stop, i) {
+        var dot = el('button', 'testi-dot');
+        dot.type = 'button';
+        dot.addEventListener('click', function () {
+          row.scrollTo({ left: stops[i].at, behavior: still && still.matches ? 'auto' : 'smooth' });
+        });
+        dotsBox.appendChild(dot);
+        return dot;
+      });
+      current = -1;
+    }
+    stops.forEach(function (stop, i) { dots[i].setAttribute('aria-label', 'Show ' + stop.name); });
+    var scrolls = stops.length > 1;
+    dotsBox.hidden = !scrolls;
+    // the row takes Tab (to scroll with the arrow keys) only when it can scroll
+    if (scrolls) row.setAttribute('tabindex', '0');
+    else row.removeAttribute('tabindex');
+    update();
+  }
+
+  // the current dot: the place nearest to where the row is now; and which
+  // edges have cards past them, to fade (styles.css)
+  function update() {
+    var x = row.scrollLeft;
+    var end = row.scrollWidth - row.clientWidth;
+    row.classList.toggle('is-past-start', x > 2);
+    row.classList.toggle('is-before-end', x < end - 2);
+    var best = 0;
+    stops.forEach(function (stop, i) {
+      if (Math.abs(stop.at - x) < Math.abs(stops[best].at - x)) best = i;
+    });
+    if (best === current) return;
+    if (dots[current]) {
+      dots[current].classList.remove('is-active');
+      dots[current].removeAttribute('aria-current');
+    }
+    dots[best].classList.add('is-active');
+    dots[best].setAttribute('aria-current', 'true');
+    current = best;
+  }
+
+  var ticking = false;
+  row.addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      ticking = false;
+      update();
+    });
+  }, { passive: true });
+
+  measure();
+  if (window.ResizeObserver) new ResizeObserver(measure).observe(row);
+  else window.addEventListener('resize', measure);
 })();
 
 // Home page: "Why fly with us" pass. Clicking "Book a free consultation" flies
