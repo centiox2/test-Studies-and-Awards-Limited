@@ -1615,19 +1615,23 @@ function createCursorFollower(options) {
   });
 })();
 
-// Home page: the testimonials, fed by js/testimonials-data.js: a card for each
-// student, side by side in a row (three across on a laptop, two on a tablet,
-// one on a phone). When there are more than fit, the row scrolls sideways
-// (a swipe, a trackpad, or the arrow keys once it has focus) and the dots
-// below appear, one for each place it can stop; the current one is longer.
-// It never moves on its own, so nobody loses their place while reading.
+// Home page: the testimonials: a card for each student, side by side in a row
+// (three across on a laptop, two on a tablet, one on a phone). When there are
+// more than fit, the row scrolls sideways (a swipe, a trackpad, or the arrow
+// keys once it has focus) and the dots below appear, one for each place it
+// can stop; the current one is longer. It also plays gently by itself, with a
+// pause button, holding whenever the visitor is reading or using it (see
+// "motion" below). The cards rise in the first time the section comes into
+// view, and the average rating counts up.
 //
-// Real quotes are always shown. Entries marked `sample: true` are stand-ins for
-// reviewing the design: they show only on a developer's own copy (a file, or
-// localhost) or when ?testimonialsPreview is added to the address, and never on
-// a real website address, so a forgotten sample can't reach visitors. With
-// nothing to show, the section stays hidden. An incomplete entry (no quote or
-// no name) is skipped rather than shown half-empty.
+// The testimonials come from the Supabase database (js/supabase-config.js),
+// where they are added and switched on in the admin page (admin/index.html):
+// only the ones switched on are shown, in the order set there. When there are
+// none, or the database can't be reached, the section stays hidden, except on
+// a developer's own copy (a file, or localhost) or with ?testimonialsPreview
+// in the address, where the samples in js/testimonials-data.js show instead,
+// tagged as samples, so the layout can be reviewed. An incomplete entry (no
+// quote or no name) is skipped rather than shown half-empty.
 //
 // A student who gave a rating gets a rating box on their card: their own
 // score, beside the average of the ratings on show once there are two or more.
@@ -1637,20 +1641,61 @@ function createCursorFollower(options) {
   var section = document.getElementById('testimonials');
   var row = document.getElementById('testimonial-row');
   var dotsBox = document.getElementById('testimonial-dots');
-  var all = window.TESTIMONIALS;
-  if (!section || !row || !dotsBox || !all || !all.length) return;
+  if (!section || !row || !dotsBox) return;
 
   var here = window.location;
   var ownCopy = here.protocol === 'file:' || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(here.hostname);
   var allowSamples = ownCopy || /[?&]testimonialsPreview(=|&|$)/.test(here.search);
+  var cfg = window.SUPABASE_CONFIG;
+  if (!window.TestimonialCard) return;
 
-  var people = all.filter(function (t) {
-    return t && t.quote && t.name && (!t.sample || allowSamples);
+  // the switched-on testimonials, in their order; null if the database can't be
+  // reached (or hasn't answered within 8 seconds)
+  function fromDatabase() {
+    if (!cfg || !cfg.url || !cfg.key || !window.fetch) return Promise.resolve(null);
+    var url = cfg.url + '/rest/v1/testimonials?select=name,detail,quote,story,rating,photo_path' +
+      '&published=eq.true&order=position.asc,created_at.asc';
+    var options = { headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key } };
+    if (window.AbortController) {
+      var stop = new AbortController();
+      window.setTimeout(function () { stop.abort(); }, 8000);
+      options.signal = stop.signal;
+    }
+    return window.fetch(url, options)
+      .then(function (response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(function (rows) {
+        return rows.map(function (r) {
+          return {
+            name: r.name,
+            detail: r.detail,
+            quote: r.quote,
+            story: r.story,
+            rating: r.rating,
+            photo: r.photo_path ? cfg.url + '/storage/v1/object/public/' + cfg.photoBucket + '/' + encodeURIComponent(r.photo_path) : ''
+          };
+        });
+      })
+      .catch(function () { return null; });
+  }
+
+  // everything in js/testimonials-data.js is a sample, whatever it says
+  function samples() {
+    return (window.TESTIMONIALS || []).map(function (t) {
+      var copy = {};
+      for (var k in t) if (Object.prototype.hasOwnProperty.call(t, k)) copy[k] = t[k];
+      copy.sample = true;
+      return copy;
+    });
+  }
+
+  fromDatabase().then(function (real) {
+    var list = real && real.length ? real : (allowSamples ? samples() : []);
+    var people = list.filter(function (t) { return t && t.quote && t.name; });
+    if (people.length) render(people);
   });
-  if (!people.length) return;
-
-  var STAR = '<svg class="testi-star" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4l-5.8 3.1 1.1-6.5-4.7-4.6 6.5-.9z"/></svg>';
-  var MARK = '<svg class="testi-mark" viewBox="0 0 27 19" width="44" height="31" aria-hidden="true"><path d="M1.5 12.5C1.5 7 5 3 10.5 1.5l.7 2.1C8 4.8 6 6 5.6 7.2a5.5 5.5 0 1 1-4.1 5.3z"/><path d="M15.5 12.5C15.5 7 19 3 24.5 1.5l.7 2.1C22 4.8 20 6 19.6 7.2a5.5 5.5 0 1 1-4.1 5.3z"/></svg>';
 
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -1659,178 +1704,254 @@ function createCursorFollower(options) {
     return node;
   }
 
-  // a score out of 5 (from 1); anything else is left out
-  function ratingOf(t) {
-    var r = typeof t.rating === 'number' ? t.rating : parseFloat(t.rating);
-    return r >= 1 && r <= 5 ? r : null;
-  }
-
-  // 5 -> "5.0", 4.5 -> "4.5", 4.8333 -> "4.83"
-  function score(r) {
-    return (Math.round(r * 100) / 100).toFixed(2).replace(/0$/, '');
-  }
-
-  function initials(name) {
-    var words = String(name).trim().split(/\s+/);
-    var last = words.length > 1 ? words[words.length - 1].charAt(0) : '';
-    return (words[0].charAt(0) + last).toUpperCase();
-  }
-
-  // "Wanjiru's rating", or "A. Wanjiru's rating" when the first name is only an initial
-  function ratingLabel(name) {
-    var first = String(name).trim().split(/\s+/)[0];
-    return (first.length > 1 && first.indexOf('.') === -1 ? first : name) + '’s rating';
-  }
-
-  function scoreBlock(className, value, label, star) {
-    var block = el('div', className);
-    var num = el('p', 'testi-score-num');
-    if (star) num.innerHTML = STAR;
-    num.appendChild(document.createTextNode(value));
-    num.appendChild(el('span', 'sr-only', ' out of 5'));
-    block.appendChild(num);
-    block.appendChild(el('p', 'testi-score-label', label));
-    return block;
-  }
-
-  var rated = [];
-  people.forEach(function (t) {
-    var r = ratingOf(t);
-    if (r !== null) rated.push(r);
-  });
-  var average = rated.length > 1 ? rated.reduce(function (a, b) { return a + b; }, 0) / rated.length : null;
-
-  var samples = 0;
-
-  people.forEach(function (t) {
-    var card = el('li', 'testi-card');
-    if (t.sample) {
-      card.appendChild(el('span', 'testi-sample', 'Sample: replace before launch'));
-      samples++;
-    }
-
-    // who they are
-    var person = el('div', 'testi-person');
-    var avatar = el('span', 'testi-avatar');
-    avatar.setAttribute('aria-hidden', 'true');
-    if (t.photo) {
-      var img = document.createElement('img');
-      img.src = t.photo;
-      img.alt = '';
-      img.width = 64;
-      img.height = 64;
-      img.loading = 'lazy';
-      img.decoding = 'async';
-      avatar.appendChild(img);
-    } else {
-      avatar.textContent = initials(t.name);
-    }
-    person.appendChild(avatar);
-    var who = el('div', 'testi-who');
-    who.appendChild(el('p', 'testi-name', 'Meet ' + t.name));
-    if (t.detail) who.appendChild(el('p', 'testi-detail', t.detail));
-    person.appendChild(who);
-    card.appendChild(person);
-
-    // their rating, pressed in, beside the average
-    var own = ratingOf(t);
-    if (own !== null) {
-      var scores = el('div', 'testi-score');
-      if (average !== null) scores.appendChild(scoreBlock('testi-score-avg', score(average), 'Average', false));
-      scores.appendChild(scoreBlock('testi-score-own', score(own), ratingLabel(t.name), true));
-      card.appendChild(scores);
-    }
-
-    // their words
-    var quote = el('blockquote', 'testi-quote');
-    quote.insertAdjacentHTML('beforeend', MARK);
-    quote.appendChild(el('p', 'testi-quote-lead', t.quote));
-    if (t.story) quote.appendChild(el('p', 'testi-quote-more', t.story));
-    card.appendChild(quote);
-
-    row.appendChild(card);
-  });
-
-  if (samples) {
-    var note = el('p', 'consult-preview testi-preview', 'Sample quotes are showing so you can review the layout. Visitors on the live site will not see them: replace them with real quotes in js/testimonials-data.js before you deploy.');
-    row.parentNode.insertBefore(note, row);
-  }
-  section.hidden = false;
-
-  // The places the row can stop, with a dot for each: the start of every
-  // card, but never past the end of the row. So three cards on a laptop, all
-  // in view, give one place and no dots; five give three.
-  var cards = Array.prototype.slice.call(row.children);
-  var stops = [];
-  var dots = [];
-  var current = -1;
-  var still = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
-
-  function measure() {
-    var pad = parseFloat(getComputedStyle(row).paddingLeft) || 0;
-    var end = row.scrollWidth - row.clientWidth;
-    var found = [];
-    cards.forEach(function (card, i) {
-      var at = Math.max(0, Math.min(Math.round(card.offsetLeft - pad), end));
-      if (!found.length || at - found[found.length - 1].at > 2) found.push({ at: at, name: people[i].name });
+  // the cards themselves are built by js/testimonial-card.js
+  function render(people) {
+    var average = window.TestimonialCard.average(people);
+    var sampleCount = 0;
+    people.forEach(function (t) {
+      if (t.sample) sampleCount++;
+      row.appendChild(window.TestimonialCard.build(t, average));
     });
-    stops = found;
-    if (dots.length !== stops.length) {
-      dotsBox.textContent = '';
-      dots = stops.map(function (stop, i) {
-        var dot = el('button', 'testi-dot');
-        dot.type = 'button';
-        dot.addEventListener('click', function () {
-          row.scrollTo({ left: stops[i].at, behavior: still && still.matches ? 'auto' : 'smooth' });
-        });
-        dotsBox.appendChild(dot);
-        return dot;
+
+    if (sampleCount) {
+      var note = el('p', 'consult-preview testi-preview', 'Sample quotes are showing because no testimonials are switched on yet. Visitors on the live site never see samples. Add real ones on the admin page (admin/index.html).');
+      row.parentNode.insertBefore(note, row);
+    }
+    section.hidden = false;
+
+    // The places the row can stop, with a dot for each: the start of every
+    // card, but never past the end of the row. So three cards on a laptop, all
+    // in view, give one place and no dots; five give three.
+    var cards = Array.prototype.slice.call(row.children);
+    var stops = [];
+    var dots = [];
+    var current = -1;
+    var still = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
+    function measure() {
+      var pad = parseFloat(getComputedStyle(row).paddingLeft) || 0;
+      var end = row.scrollWidth - row.clientWidth;
+      var found = [];
+      cards.forEach(function (card, i) {
+        var at = Math.max(0, Math.min(Math.round(card.offsetLeft - pad), end));
+        if (!found.length || at - found[found.length - 1].at > 2) found.push({ at: at, name: people[i].name });
       });
-      current = -1;
-    }
-    stops.forEach(function (stop, i) { dots[i].setAttribute('aria-label', 'Show ' + stop.name); });
-    var scrolls = stops.length > 1;
-    dotsBox.hidden = !scrolls;
-    // the row takes Tab (to scroll with the arrow keys) only when it can scroll
-    if (scrolls) row.setAttribute('tabindex', '0');
-    else row.removeAttribute('tabindex');
-    update();
-  }
-
-  // the current dot: the place nearest to where the row is now; and which
-  // edges have cards past them, to fade (styles.css)
-  function update() {
-    var x = row.scrollLeft;
-    var end = row.scrollWidth - row.clientWidth;
-    row.classList.toggle('is-past-start', x > 2);
-    row.classList.toggle('is-before-end', x < end - 2);
-    var best = 0;
-    stops.forEach(function (stop, i) {
-      if (Math.abs(stop.at - x) < Math.abs(stops[best].at - x)) best = i;
-    });
-    if (best === current) return;
-    if (dots[current]) {
-      dots[current].classList.remove('is-active');
-      dots[current].removeAttribute('aria-current');
-    }
-    dots[best].classList.add('is-active');
-    dots[best].setAttribute('aria-current', 'true');
-    current = best;
-  }
-
-  var ticking = false;
-  row.addEventListener('scroll', function () {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(function () {
-      ticking = false;
+      stops = found;
+      if (dots.length !== stops.length) {
+        dotsBox.textContent = '';
+        dots = stops.map(function (stop, i) {
+          var dot = el('button', 'testi-dot');
+          dot.type = 'button';
+          dot.addEventListener('click', function () {
+            row.scrollTo({ left: stops[i].at, behavior: still && still.matches ? 'auto' : 'smooth' });
+          });
+          dotsBox.appendChild(dot);
+          return dot;
+        });
+        current = -1;
+      }
+      stops.forEach(function (stop, i) { dots[i].setAttribute('aria-label', 'Show ' + stop.name); });
+      var scrolls = stops.length > 1;
+      dotsBox.hidden = !scrolls;
+      // the row takes Tab (to scroll with the arrow keys) only when it can scroll
+      if (scrolls) row.setAttribute('tabindex', '0');
+      else row.removeAttribute('tabindex');
       update();
-    });
-  }, { passive: true });
+      syncPlay();
+    }
 
-  measure();
-  if (window.ResizeObserver) new ResizeObserver(measure).observe(row);
-  else window.addEventListener('resize', measure);
+    // the current dot: the place nearest to where the row is now; and which
+    // edges have cards past them, to fade (styles.css)
+    function update() {
+      var x = row.scrollLeft;
+      var end = row.scrollWidth - row.clientWidth;
+      row.classList.toggle('is-past-start', x > 2);
+      row.classList.toggle('is-before-end', x < end - 2);
+      var best = 0;
+      stops.forEach(function (stop, i) {
+        if (Math.abs(stop.at - x) < Math.abs(stops[best].at - x)) best = i;
+      });
+      if (best === current) return;
+      if (dots[current]) {
+        dots[current].classList.remove('is-active');
+        dots[current].removeAttribute('aria-current');
+      }
+      dots[best].classList.add('is-active');
+      dots[best].setAttribute('aria-current', 'true');
+      current = best;
+    }
+
+    var ticking = false;
+    row.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(function () {
+        ticking = false;
+        update();
+      });
+    }, { passive: true });
+
+    // ---- motion: the cards rise in, the average counts up, and the row plays ----
+    // Auto-play: while the section is in view, the current dot fills up over
+    // 6 seconds and the row then moves on one place, looping back to the start.
+    // The fill (styles.css) is the clock, so holding the fill holds the play.
+    // It holds while the mouse is over the cards or dots or they have the
+    // focus, stops for good once the visitor moves the row themselves (a click,
+    // drag, swipe, key, sideways wheel or dot), and the button pauses and
+    // plays it. It only plays when there are more cards than fit, and never
+    // for visitors who ask for reduced motion.
+    var playBtn = document.getElementById('testimonial-play');
+    var playing = true;
+    var hovering = false;
+    var focused = false;
+    var inView = !window.IntersectionObserver;
+    var canPlay = false;
+    var reduced = function () { return !!(still && still.matches); };
+
+    function syncPlay() {
+      canPlay = !!playBtn && stops.length > 1 && !reduced();
+      if (playBtn) {
+        playBtn.hidden = !canPlay;
+        playBtn.classList.toggle('is-stopped', !playing);
+        playBtn.setAttribute('aria-label', playing ? 'Pause the testimonials' : 'Play the testimonials');
+      }
+      dotsBox.classList.toggle('is-playing', canPlay && playing);
+      dotsBox.classList.toggle('is-held', hovering || focused || !inView);
+    }
+
+    function stopPlaying() {
+      if (!playing) return;
+      playing = false;
+      syncPlay();
+    }
+
+    dotsBox.addEventListener('animationend', function (event) {
+      if (event.animationName !== 'testi-fill' || !canPlay || !playing || !stops.length) return;
+      row.scrollTo({ left: stops[(current + 1) % stops.length].at, behavior: 'smooth' });
+    });
+    if (playBtn) {
+      playBtn.addEventListener('click', function () {
+        playing = !playing;
+        syncPlay();
+      });
+    }
+    row.addEventListener('pointerdown', stopPlaying);
+    row.addEventListener('keydown', stopPlaying);
+    row.addEventListener('wheel', function (event) {
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) stopPlaying();
+    }, { passive: true });
+    dotsBox.addEventListener('click', stopPlaying);
+    [row, dotsBox].forEach(function (area) {
+      area.addEventListener('mouseenter', function () { hovering = true; syncPlay(); });
+      area.addEventListener('mouseleave', function () { hovering = false; syncPlay(); });
+      area.addEventListener('focusin', function () { focused = true; syncPlay(); });
+      area.addEventListener('focusout', function (event) {
+        var to = event.relatedTarget;
+        focused = !!(to && (row.contains(to) || dotsBox.contains(to)));
+        syncPlay();
+      });
+    });
+    if (still) {
+      if (still.addEventListener) still.addEventListener('change', syncPlay);
+      else if (still.addListener) still.addListener(syncPlay);
+    }
+
+    // the average rating counts up from 0 to itself
+    function countUp() {
+      Array.prototype.forEach.call(row.querySelectorAll('.testi-score-avg .testi-score-num'), function (num) {
+        var text = num.firstChild;
+        if (!text || text.nodeType !== 3) return;
+        var target = text.nodeValue;
+        var value = parseFloat(target);
+        if (!(value > 0)) return;
+        var decimals = (target.split('.')[1] || '').length;
+        var start = null;
+        text.nodeValue = (0).toFixed(decimals);
+        window.requestAnimationFrame(function frame(now) {
+          if (start === null) start = now;
+          var k = Math.min(1, (now - start) / 1200);
+          text.nodeValue = k < 1 ? (value * (1 - Math.pow(1 - k, 3))).toFixed(decimals) : target;
+          if (k < 1) window.requestAnimationFrame(frame);
+        });
+      });
+    }
+
+    // the first time the section comes into view: the cards rise in, one after
+    // another, and the average counts up; being in view also lets it play
+    if (window.IntersectionObserver) {
+      if (!reduced()) {
+        row.classList.add('is-waiting');
+        cards.forEach(function (card, i) { card.style.setProperty('--i', Math.min(i, 5)); });
+      }
+      var arrived = false;
+      new IntersectionObserver(function (entries) {
+        inView = entries[entries.length - 1].isIntersecting;
+        if (inView && !arrived) {
+          arrived = true;
+          row.classList.remove('is-waiting');
+          if (!reduced()) {
+            row.classList.add('is-in');
+            countUp();
+          }
+        }
+        syncPlay();
+      }, { threshold: 0.25 }).observe(row);
+    }
+
+    measure();
+    if (window.ResizeObserver) new ResizeObserver(measure).observe(row);
+    else window.addEventListener('resize', measure);
+  }
+})();
+
+// "Check your eligibility for Australia" ([data-ai-checker], on the home page
+// and the Australia page): the AI eligibility checker, built as its own app
+// (the Studies-and-Awards-AI project). Until it is live the button opens a
+// short "coming soon" note with a way to book a consultation instead. Once it
+// is live, put its address in AI_CHECKER_URL: the "Coming soon" tag goes and
+// the button takes visitors straight there.
+(function () {
+  'use strict';
+
+  var AI_CHECKER_URL = '';
+
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-ai-checker]'));
+  if (!buttons.length) return;
+
+  if (AI_CHECKER_URL) {
+    buttons.forEach(function (button) {
+      var tag = button.querySelector('.ai-check-tag');
+      if (tag) tag.hidden = true;
+      button.addEventListener('click', function () { window.location.href = AI_CHECKER_URL; });
+    });
+    return;
+  }
+
+  var note = null;
+  function build() {
+    note = document.createElement('dialog');
+    note.className = 'ai-soon';
+    note.setAttribute('aria-labelledby', 'ai-soon-title');
+    note.innerHTML =
+      '<button type="button" class="ai-soon-close" aria-label="Close">&times;</button>' +
+      '<span class="ai-check-tag">Coming soon</span>' +
+      '<h2 id="ai-soon-title">Check your eligibility for Australia</h2>' +
+      '<p>We&rsquo;re building an online checker that compares your KCSE results with the entry requirements of Australian universities and colleges, and shows the courses you could apply for.</p>' +
+      '<p>Until it&rsquo;s ready, our counsellors will check this with you at a free consultation.</p>' +
+      '<a href="mailto:admissions@studiesandawardsltd.com?subject=Free%20Consultation%20Request%20-%20Australia" class="btn btn-primary">Book a free consultation</a>';
+    note.querySelector('.ai-soon-close').addEventListener('click', function () { note.close(); });
+    // the consultation chooser opens over the page, so the note steps aside first
+    note.querySelector('.btn').addEventListener('click', function () { note.close(); });
+    document.body.appendChild(note);
+  }
+
+  buttons.forEach(function (button) {
+    button.addEventListener('click', function () {
+      if (!note) build();
+      if (note.showModal) note.showModal();
+      else window.location.href = note.querySelector('.btn').href;
+    });
+  });
 })();
 
 // Home page: "Why fly with us" pass. Clicking "Book a free consultation" flies
