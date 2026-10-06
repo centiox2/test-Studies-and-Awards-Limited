@@ -51,6 +51,90 @@
 
 })();
 
+// Footer: the social links pop in one after another the first time the
+// footer comes into view, each flashing its network's colour as it lands
+// (styles.css, "the social links"). Not with reduced motion.
+(function () {
+  'use strict';
+
+  var row = document.querySelector('.footer-bottom-social');
+  if (!row || !window.IntersectionObserver) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  Array.prototype.forEach.call(row.querySelectorAll('.social-link'), function (link, i) {
+    link.style.setProperty('--i', String(i));
+  });
+  row.classList.add('is-waiting');
+  var seen = new IntersectionObserver(function (entries) {
+    if (!entries[entries.length - 1].isIntersecting) return;
+    seen.disconnect();
+    row.classList.remove('is-waiting');
+    row.classList.add('is-in');
+  }, { rootMargin: '0px 0px -8% 0px' });
+  seen.observe(row);
+})();
+
+// "Portal login": one button (in the header, and in the footer's bottom row)
+// opening a small menu with the student portal, the staff portal and the
+// admin portal (the testimonials admin page). It
+// closes on a click elsewhere, on Escape (which puts the focus back on the
+// button) and when the focus moves out of it; the arrow keys move between the
+// choices. In the phone menu the button is hidden and all three are
+// listed under a heading instead (styles.css).
+(function () {
+  'use strict';
+
+  var menus = Array.prototype.slice.call(document.querySelectorAll('.nav-portal'));
+  if (!menus.length) return;
+
+  function parts(wrap) {
+    return { btn: wrap.querySelector('.nav-portal-btn'), items: Array.prototype.slice.call(wrap.querySelectorAll('.nav-portal-item')) };
+  }
+  function close(wrap, focusButton) {
+    if (!wrap.classList.contains('is-open')) return;
+    wrap.classList.remove('is-open');
+    var btn = parts(wrap).btn;
+    btn.setAttribute('aria-expanded', 'false');
+    if (focusButton) btn.focus();
+  }
+  function open(wrap) {
+    menus.forEach(function (other) { if (other !== wrap) close(other); });
+    wrap.classList.add('is-open');
+    parts(wrap).btn.setAttribute('aria-expanded', 'true');
+  }
+
+  menus.forEach(function (wrap) {
+    var p = parts(wrap);
+    if (!p.btn || !p.items.length) return;
+    p.btn.addEventListener('click', function () {
+      if (wrap.classList.contains('is-open')) close(wrap);
+      else open(wrap);
+    });
+    wrap.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && wrap.classList.contains('is-open')) {
+        e.stopPropagation();
+        close(wrap, true);
+        return;
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      var at = p.items.indexOf(document.activeElement);
+      if (at < 0 && document.activeElement !== p.btn) return;
+      e.preventDefault();
+      if (!wrap.classList.contains('is-open')) open(wrap);
+      var next = at < 0 ? (e.key === 'ArrowDown' ? 0 : p.items.length - 1)
+        : (at + (e.key === 'ArrowDown' ? 1 : -1) + p.items.length) % p.items.length;
+      p.items[next].focus();
+    });
+    wrap.addEventListener('focusout', function (e) {
+      if (!e.relatedTarget || !wrap.contains(e.relatedTarget)) close(wrap);
+    });
+  });
+
+  document.addEventListener('click', function (e) {
+    menus.forEach(function (wrap) { if (!wrap.contains(e.target)) close(wrap); });
+  });
+})();
+
 // Footer newsletter box, no backend on this site, so "subscribing" opens
 // the visitor's own mail client with the address pre-filled, same as every
 // other call-to-action on the site.
@@ -3296,10 +3380,19 @@ function createCursorFollower(options) {
     var s = status();
     Array.prototype.forEach.call(badges, function (badge) {
       if (!s) { badge.hidden = true; return; }
+      var changed = badge.hidden || badge.getAttribute('data-state') !== s.state;
       badge.textContent = s.text;
       badge.classList.toggle('is-open', s.state !== 'closed');
       badge.classList.toggle('is-soon', s.state === 'soon');
+      badge.setAttribute('data-state', s.state);
       badge.hidden = false;
+      // the words ease in when the badge first shows, or changes (styles.css)
+      if (changed) {
+        badge.classList.remove('is-changed');
+        // eslint-disable-next-line no-unused-expressions
+        badge.offsetWidth;
+        badge.classList.add('is-changed');
+      }
     });
     if (sign) {
       var plate = sign.querySelector('.door-sign-plate');

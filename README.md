@@ -10,7 +10,7 @@ site/              The actual website. Open site/index.html in a browser,
                     "next destination" boarding-pass card, partner
                     institutions dialog, "Book Free Consultation" chooser)
   js/theme.js       The dark mode switch (sun and moon button), on every
-                    page including the student portal
+                    page
   js/team-data.js   The staff: bios for the Team page, plus each person's
                     department, what they help with and WhatsApp number for
                     the consultation chooser. Loaded on every page.
@@ -29,8 +29,8 @@ site/              The actual website. Open site/index.html in a browser,
                     The Supabase project's address and publishable key,
                     for the home page testimonials and the admin page.
   admin/index.html  The testimonials admin page (sign in, then add, edit,
-                    reorder, show or hide, delete). Not linked from the
-                    site. With js/admin.js, css/admin.css and
+                    reorder, show or hide, delete). Linked from the
+                    "Portal login" menu. With js/admin.js, css/admin.css and
                     js/vendor/supabase.js (a pinned copy of supabase-js).
   js/destinations-data.js
                     GENERATED. Destination registry (name, airport code,
@@ -56,8 +56,7 @@ tools/              Build scripts, not part of the deployed site.
                             Run:   node tools/generate-countries.mjs
                             Check: node tools/generate-countries.mjs --check
   theme-markup.mjs         The dark mode <head> script and the sun and moon
-                            switch's markup, shared by generate-countries.mjs
-                            and generate-portal.mjs.
+                            switch's markup, used by generate-countries.mjs.
   process-photos.mjs       Resizes and compresses raw destination photos from
                             source-assets/ into web-ready ones in site/assets/.
                             Run: node tools/process-photos.mjs <source folder> <site folder>
@@ -139,19 +138,18 @@ source-assets/      Raw, uncompressed originals (destination photos, logo).
   input are not scaled. It lives in the "laptop fit" block near the top of
   `styles.css`, which also explains the two rules for editing that file: write
   vw/vh sizes as `calc(4vw / var(--z, 1))`, and a new width breakpoint between
-  1024px and 1400px needs the extra real-width condition shown there. The
-  student portal has its own stylesheet (`css/portal.css`) and is not scaled.
-- **Colours and dark mode**: every page, the student portal included, comes
+  1024px and 1400px needs the extra real-width condition shown there.
+- **Colours and dark mode**: every page comes
   in a light and a dark theme. Every visitor starts on the light theme,
   whatever their phone or laptop is set to, and sees dark mode only after
   switching to it themselves (the pull cord on laptops and desktops, the sun
-  and moon button in the header on phones, tablets and the portal). That
+  and moon button in the header on phones and tablets). That
   choice is saved on their device for the whole site; switching back to
   light forgets it again. Where the browser won't let a page
   save anything (a preview, or a browser set to block site data), the choice
   still carries from page to page in that tab (it rides in the tab's
   `window.name`). How it fits together:
-  - **Colours.** `styles.css` (and `portal.css`, the same way) has two kinds.
+  - **Colours.** `styles.css` has two kinds.
     *Theme colours* are the variables at the top of the file (`--bg`,
     `--paper`, `--surface`, `--text-strong`, `--text`, `--muted`, `--border`,
     `--line-strong`, the `--tint-NN` and `--shadow-NN` scales, and a few more,
@@ -171,13 +169,13 @@ source-assets/      Raw, uncompressed originals (destination photos, logo).
   - **Choosing the theme before the page is drawn.** A one-line script in each
     page's `<head>` sets `data-theme` on `<html>` (the saved choice, or
     light), so someone who chose dark never sees the light page flash first. It is `THEME_SCRIPT` in `tools/theme-markup.mjs`, which
-    both generators write into their pages; `404.html` has a hand copy.
+    the generator writes into its pages; `404.html` has a hand copy.
     Without JavaScript the site shows the light theme.
   - **The switch.** Its markup is `themeToggle()` in `tools/theme-markup.mjs`
-    (used by both generators); the hand-maintained pages and `404.html` carry
+    (used by the generator); the hand-maintained pages and `404.html` carry
     the same button, written in by hand. Its styles are `.theme-toggle` in
-    `styles.css` and `portal.css`, and `js/theme.js` (loaded by every page,
-    just before `main.js` or `portal.js`) keeps it in step and saves the
+    `styles.css`, and `js/theme.js` (loaded by every page,
+    just before `main.js`) keeps it in step and saves the
     choice.
   - **The pull cord.** On laptops and desktops (mouse or trackpad, 1024px and
     wider) the main site's switch is a cord with a gold knob hanging at the
@@ -185,7 +183,7 @@ source-assets/      Raw, uncompressed originals (destination photos, logo).
     moon button is hidden there: pull the knob down past the click, or click
     it, and the theme switches. It is a proper button too: Tab reaches it
     just after the header, screen readers hear "Dark mode, toggle button",
-    and Enter or Space switches. Phones, tablets and the student portal keep
+    and Enter or Space switches. Phones and tablets keep
     the sun and moon button instead. `js/theme.js` builds the cord (a small
     rope simulation that stops when the cord is still) and it presses the
     hidden header button, so the choice is saved the same way. Its look is
@@ -272,6 +270,16 @@ source-assets/      Raw, uncompressed originals (destination photos, logo).
 - **Slideshow photos on phones**: each city photo has a 3:4 crop in
   `<country>/portrait/`, which phones and portrait tablets load instead of the
   full 1920px photo. `node tools/make-editorial-photos.mjs` makes them.
+- **Portal login**: one "Portal login" button in the header (and in the
+  footer's bottom row) opens a small menu: the student portal
+  (`https://student.studiesandawardsltd.com/login`), the staff portal
+  (`https://student.studiesandawardsltd.com/staff-login`) and the admin
+  portal, the testimonials admin page (`admin/index.html`; `/admin/index.html` on
+  `404.html`). In the phone menu all three are listed under a "Portal login" heading. The menu is
+  written into every page's header and footer by hand and in the template in
+  `tools/generate-countries.mjs`, so a new address means changing it in all
+  of them (search for `nav-portal`). Its behaviour is in `main.js`, its look
+  is `.nav-portal` in `styles.css`.
 - **Direct links**: `team.html#<id>` (e.g. `team.html#miki`) opens on that
   person, and `index.html#faq-visa` opens that FAQ answer (the ids are on the
   `<details>` in `index.html`). Both update the address bar as visitors browse.
@@ -368,9 +376,9 @@ source-assets/      Raw, uncompressed originals (destination photos, logo).
   two or more have. The "WHAT PEOPLE SAY" line above the heading is in
   `index.html`; a figure such as "500+ happy students" can go there once you
   have a real count.
-- **Adding and changing testimonials (the admin page)**: go to
-  `admin/index.html` on the site (e.g. `https://<your site>/admin/`) and sign
-  in. There you can add a testimonial (name, who they are, their words, more
+- **Adding and changing testimonials (the admin page)**: choose "Portal
+  login", then "Admin portal" on any page (it is `admin/index.html`,
+  e.g. `https://<your site>/admin/`), and sign in. There you can add a testimonial (name, who they are, their words, more
   of their story, a rating, a photo), see a preview of the card as you type,
   edit it, change the order, show it on the website or hide it, and delete it.
   Changes appear on the home page straight away, with no editing of files or
