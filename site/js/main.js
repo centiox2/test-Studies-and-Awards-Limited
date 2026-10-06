@@ -2407,6 +2407,358 @@ function createCursorFollower(options) {
   });
 })();
 
+// Services page: the motion (the look is in styles.css, "services: the
+// motion"). As the visitor scrolls, a gold line fills down the steps' line
+// to a reading line 60% of the way down the window, with a small document
+// riding its tip: their file moving from one department to the next. Each
+// dot the line reaches turns gold with a tick, with one soft ring when it's
+// reached on the way down; scrolling back up undoes them. Each step eases in
+// the first time it comes on screen, a dashed arc round step 2 shows the way
+// round it for students who have already sat IELTS elsewhere, the six steps at the top appear one
+// after another, and a step reached from a link on the page glows for a
+// moment. With reduced motion it shows the finished picture (the whole line
+// gold, every dot ticked) and nothing moves; without this script the steps
+// simply show as they are.
+(function () {
+  'use strict';
+
+  var list = document.querySelector('.svc-steps');
+  if (!list) return;
+  var steps = Array.prototype.slice.call(list.querySelectorAll('.svc-step'));
+  var dots = steps.map(function (step) { return step.querySelector('.svc-step-dot'); });
+  if (steps.length < 2 || dots.indexOf(null) > -1) return;
+
+  var still = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  function reduced() { return !!(still && still.matches); }
+
+  var READING_LINE = 0.6; // of the window's height
+  var SVG = 'http://www.w3.org/2000/svg';
+  var last = steps.length - 1;
+
+  var fill = document.createElement('span');
+  fill.className = 'svc-fill';
+  fill.setAttribute('aria-hidden', 'true');
+  var file = document.createElement('span');
+  file.className = 'svc-file';
+  file.setAttribute('aria-hidden', 'true');
+  file.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>';
+  list.appendChild(fill);
+  list.appendChild(file);
+  list.classList.add('is-live');
+
+  // the arc round the step marked has-shortcut (language classes, which
+  // students who have already sat IELTS elsewhere go round), from the dot
+  // before it into the dot after
+  var shortcut = -1;
+  steps.forEach(function (step, i) { if (shortcut < 0 && step.classList.contains('has-shortcut') && i > 0 && i < last) shortcut = i; });
+  var skip = null;
+  var arc = null;
+  var head = null;
+  if (shortcut > -1) {
+    skip = document.createElementNS(SVG, 'svg');
+    skip.setAttribute('class', 'svc-skip');
+    skip.setAttribute('aria-hidden', 'true');
+    arc = document.createElementNS(SVG, 'path');
+    arc.setAttribute('class', 'svc-skip-arc');
+    head = document.createElementNS(SVG, 'path');
+    skip.appendChild(arc);
+    skip.appendChild(head);
+    list.appendChild(skip);
+  }
+
+  // where things are, in the list's own CSS pixels (the laptop fit zooms
+  // the page, and positions on screen come back zoomed)
+  var centres = [];
+  var lineX = 0;
+  var radius = 0;
+  var room = 0; // from the window's left edge to the line
+
+  function measure() {
+    var z = pageZoom();
+    var box = list.getBoundingClientRect();
+    centres = dots.map(function (dot) {
+      var r = dot.getBoundingClientRect();
+      return (r.top + r.height / 2 - box.top) / z;
+    });
+    var first = dots[0].getBoundingClientRect();
+    lineX = (first.left + first.width / 2 - box.left) / z;
+    radius = first.width / 2 / z;
+    room = (first.left + first.width / 2) / z;
+    fill.style.left = lineX + 'px';
+    fill.style.top = centres[0] + 'px';
+    file.style.left = lineX + 'px';
+    if (skip) drawSkip();
+  }
+
+  // the arc bows out to the left of the line, as far as the window allows
+  function drawSkip() {
+    var bulge = Math.max(16, Math.min(Math.round(radius * 2), Math.floor(room - 8)));
+    var top = centres[shortcut - 1] + radius + 6;
+    var bottom = centres[shortcut + 1] - radius - 6;
+    var height = Math.max(0, bottom - top);
+    var width = bulge + 8;
+    var x = width - 1; // the line, at the svg's right edge
+    skip.style.left = (lineX - x) + 'px';
+    skip.style.top = top + 'px';
+    skip.setAttribute('width', width);
+    skip.setAttribute('height', height);
+    skip.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    // control points level with the ends make a round bow whose widest
+    // point, halfway down, is `bulge` from the line
+    var cx = x - bulge * 4 / 3;
+    arc.setAttribute('d', 'M' + x + ' 0C' + cx + ' 0 ' + cx + ' ' + height + ' ' + x + ' ' + height);
+    // the arrowhead, pointing back in to the line just above the next dot
+    head.setAttribute('d', 'M' + (x - 7) + ' ' + (height - 5) + 'L' + x + ' ' + height + 'L' + (x - 7) + ' ' + (height + 5));
+  }
+
+  function pulse(dot) {
+    dot.classList.remove('is-pulse');
+    void dot.offsetWidth; // restart the ring if it's still going
+    dot.classList.add('is-pulse');
+  }
+  dots.forEach(function (dot) {
+    dot.addEventListener('animationend', function (e) {
+      if (e.animationName === 'svc-pulse') dot.classList.remove('is-pulse');
+    });
+  });
+
+  var lastTip = null;
+  var ticking = false;
+
+  function update() {
+    ticking = false;
+    var z = pageZoom();
+    var finished = reduced();
+    var tip = finished ? centres[last] : (window.innerHeight * READING_LINE - list.getBoundingClientRect().top) / z;
+    var shownTip = Math.max(centres[0], Math.min(centres[last], tip));
+    fill.style.height = (shownTip - centres[0]) + 'px';
+    file.style.top = shownTip + 'px';
+    // the file shows on the way between dots, slipping into each one it passes
+    var inDot = centres.some(function (c) { return Math.abs(shownTip - c) < radius + 8; });
+    file.classList.toggle('is-shown', !finished && !inDot && tip > centres[0] && tip < centres[last]);
+    var goingDown = lastTip !== null && tip > lastTip;
+    steps.forEach(function (step, i) {
+      var done = tip >= centres[i] - 0.5;
+      if (done === step.classList.contains('is-done')) return;
+      step.classList.toggle('is-done', done);
+      if (done && goingDown && !finished) pulse(dots[i]);
+    });
+    lastTip = tip;
+  }
+
+  function later() {
+    if (!ticking) { ticking = true; window.requestAnimationFrame(update); }
+  }
+
+  measure();
+  update();
+  window.addEventListener('scroll', later, { passive: true });
+  window.addEventListener('resize', function () { measure(); later(); });
+  // the steps change height as fonts and photos arrive
+  if (window.ResizeObserver) new ResizeObserver(function () { measure(); later(); }).observe(list);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { measure(); later(); });
+  if (still) {
+    var onChange = function () { measure(); update(); if (skip && reduced()) skip.classList.add('is-drawn'); };
+    if (still.addEventListener) still.addEventListener('change', onChange);
+    else if (still.addListener) still.addListener(onChange);
+  }
+
+  // each step eases in the first time it comes on screen; the arc draws as
+  // its step comes into view
+  if (window.IntersectionObserver && !reduced()) {
+    steps.forEach(function (step) {
+      step.classList.add('is-waiting');
+      Array.prototype.forEach.call(step.querySelectorAll('.svc-people li'), function (li, i) {
+        li.style.setProperty('--i', String(Math.min(i, 6)));
+      });
+    });
+    var seen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (!entry.isIntersecting) return;
+        var step = entry.target;
+        seen.unobserve(step);
+        step.classList.remove('is-waiting');
+        step.classList.add('is-in');
+        if (skip && step === steps[shortcut]) skip.classList.add('is-drawn');
+      });
+    }, { rootMargin: '0px 0px -12% 0px' });
+    steps.forEach(function (step) { seen.observe(step); });
+  } else if (skip) {
+    skip.classList.add('is-drawn');
+  }
+
+  // the six steps at the top appear one after another
+  var glance = document.querySelector('.svc-glance');
+  if (glance && !reduced()) {
+    Array.prototype.forEach.call(glance.querySelectorAll('li'), function (li, i) {
+      li.style.setProperty('--i', String(i));
+    });
+    glance.classList.add('is-in');
+  }
+
+  // a step reached from a link on the page (the glance, "Go straight to step 3")
+  // glows for a moment once the page has finished gliding to it
+  function arrive(step) {
+    var y = null;
+    var calm = 0;
+    var waited = 0;
+    function check() {
+      var now = window.pageYOffset;
+      calm = now === y ? calm + 1 : 0;
+      y = now;
+      if ((calm < 6 && waited++ < 120)) { window.requestAnimationFrame(check); return; }
+      step.classList.remove('is-arrived');
+      void step.offsetWidth;
+      step.classList.add('is-arrived');
+      pulse(step.querySelector('.svc-step-dot'));
+    }
+    window.requestAnimationFrame(check);
+  }
+  steps.forEach(function (step) {
+    step.addEventListener('animationend', function (e) {
+      if (e.animationName === 'svc-arrive') step.classList.remove('is-arrived');
+    });
+  });
+  function stepFor(hash) {
+    var id = '';
+    try { id = decodeURIComponent(String(hash || '').slice(1)); } catch (e) { return null; }
+    var target = id && document.getElementById(id);
+    return target && steps.indexOf(target) > -1 ? target : null;
+  }
+  document.addEventListener('click', function (e) {
+    var link = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    var step = link && stepFor(link.getAttribute('href'));
+    if (step && !reduced()) arrive(step);
+  });
+  var linked = stepFor(window.location.hash);
+  if (linked && !reduced()) arrive(linked);
+})();
+
+// Home page, "How it works": the motion (the look is in styles.css). As the
+// visitor scrolls, the checklist's boxes tick one after another, each once its
+// row has risen above a line 70% of the way down the window (scrolling back
+// up unticks them), and a plane flies along a track from EDL towards ABROAD,
+// landing when all six are ticked. The first time the section comes into view
+// the text eases in and the card lands, its rows following one after another.
+// With reduced motion none of it runs: the card stays as it is in the page,
+// with the first two steps ticked.
+(function () {
+  'use strict';
+
+  var section = document.querySelector('.how');
+  var card = section && section.querySelector('.how-card');
+  if (!card) return;
+  var still = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  if (still && still.matches) return;
+
+  var READING_LINE = 0.7; // of the window's height
+  var TICK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  var items = Array.prototype.slice.call(card.querySelectorAll('.how-item'));
+  var boxes = items.map(function (item) { return item.querySelector('.how-box'); });
+  if (!items.length || boxes.indexOf(null) > -1) return;
+
+  // every box gets a tick to draw, and they all start empty (remembering
+  // which were ticked in the page, for reduced motion later)
+  var original = boxes.map(function (box) { return box.classList.contains('is-ticked'); });
+  boxes.forEach(function (box) {
+    if (!box.querySelector('svg')) box.innerHTML = TICK;
+    box.classList.remove('is-ticked');
+    box.addEventListener('animationend', function (e) {
+      if (e.animationName === 'how-pulse') box.classList.remove('is-pulse');
+    });
+  });
+
+  // the route: EDL, a track with the plane, ABROAD (in place of the arrow)
+  var route = card.querySelector('.how-card-route');
+  var fill = null;
+  var plane = null;
+  if (route) {
+    var track = document.createElement('span');
+    track.className = 'how-track';
+    fill = document.createElement('span');
+    fill.className = 'how-track-fill';
+    plane = document.createElement('span');
+    plane.className = 'how-plane';
+    plane.innerHTML = '<svg viewBox="-0.5 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>';
+    track.appendChild(fill);
+    track.appendChild(plane);
+    var arrow = route.querySelector('svg');
+    if (arrow) route.insertBefore(track, arrow);
+    else route.appendChild(track);
+  }
+  card.classList.add('is-live');
+
+  var lastCount = null;
+  var ticking = false;
+
+  function update() {
+    ticking = false;
+    var line = window.innerHeight * READING_LINE;
+    var count = 0;
+    boxes.forEach(function (box, i) {
+      var r = box.getBoundingClientRect();
+      var on = r.top + r.height / 2 <= line;
+      if (on) count = i + 1;
+    });
+    boxes.forEach(function (box, i) {
+      var on = i < count;
+      if (on === box.classList.contains('is-ticked')) return;
+      box.classList.toggle('is-ticked', on);
+      if (on && lastCount !== null && count > lastCount) {
+        box.classList.remove('is-pulse');
+        void box.offsetWidth;
+        box.classList.add('is-pulse');
+      }
+    });
+    if (fill) {
+      var share = (count / boxes.length * 100) + '%';
+      fill.style.width = share;
+      plane.style.left = share;
+    }
+    lastCount = count;
+  }
+
+  function later() {
+    if (!ticking) { ticking = true; window.requestAnimationFrame(update); }
+  }
+
+  // the first view: the text, the card, then its rows
+  if (window.IntersectionObserver) {
+    Array.prototype.forEach.call(section.querySelectorAll('.how-intro > *'), function (el, i) {
+      el.style.setProperty('--i', String(i));
+    });
+    items.forEach(function (item, i) { item.style.setProperty('--i', String(i)); });
+    section.classList.add('is-waiting');
+    // watched on the card, not the section: on a big screen the top of the
+    // navy band already shows below the hero, and it shouldn't play unseen
+    var seen = new IntersectionObserver(function (entries) {
+      if (!entries[entries.length - 1].isIntersecting) return;
+      seen.disconnect();
+      section.classList.remove('is-waiting');
+      section.classList.add('is-in');
+    }, { rootMargin: '0px 0px -15% 0px' });
+    seen.observe(card);
+  }
+
+  update();
+  window.addEventListener('scroll', later, { passive: true });
+  window.addEventListener('resize', later);
+  // asked for reduced motion part way through: put the card back as it was
+  if (still) {
+    var restore = function () {
+      if (!still.matches) return;
+      window.removeEventListener('scroll', later);
+      window.removeEventListener('resize', later);
+      section.classList.remove('is-waiting', 'is-in');
+      var count = 0;
+      boxes.forEach(function (box, i) { box.classList.toggle('is-ticked', original[i]); if (original[i]) count++; });
+      if (fill) { fill.style.width = (count / boxes.length * 100) + '%'; plane.style.left = fill.style.width; }
+    };
+    if (still.addEventListener) still.addEventListener('change', restore);
+    else if (still.addListener) still.addListener(restore);
+  }
+})();
+
 // Whether the office is open, worked out in Kenya time (UTC+3 all year)
 // whatever the visitor's own time zone: the "Open now" badge by the hours in
 // the footer, and the little door sign (OPEN / CLOSING / CLOSED) on Find Us.

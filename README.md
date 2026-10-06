@@ -292,6 +292,21 @@ source-assets/      Raw, uncompressed originals (destination photos, logo).
   The step text names people too, so change it to match. Each step's "Ask
   about…" button carries `data-consult-dept="<department>"`, which opens the
   consultation chooser already filtered to that department.
+  The motion (`main.js`, "Services page: the motion"): as you scroll, a gold
+  line fills down the steps' line with a small document riding its tip (the
+  student's file moving between departments), and each dot it reaches turns
+  gold with a tick. Each step eases in the first time it's on screen. A quiet
+  dashed arc round step 2 (the step marked `has-shortcut`) draws in on wider
+  screens. It is the way round language classes for students who have already
+  sat IELTS elsewhere; language classes are otherwise part of every student's
+  journey. A step reached from a link on the page glows for a
+  moment. Visitors who ask their device for reduced motion see the finished
+  picture, with nothing moving.
+  The home page's "How it works" checklist is the same six steps in short:
+  if the steps change, change both. As you scroll, its boxes tick one after
+  another and a plane flies along the EDL → ABROAD route in the card's head.
+  With reduced motion the card shows as written in `index.html`, with the
+  first two boxes ticked.
 - **Destination specialists**: give a team member `destinations: ['Germany']`
   in `js/team-data.js` and they lead the consultation list, tagged "Best for
   Germany", when someone books from that country's page.
