@@ -1839,7 +1839,7 @@ function createCursorFollower(options) {
 // arrow keys (once the stack has focus) bring another one forward; the order
 // wraps round. No auto-play: it moves only when the visitor asks.
 //
-// The testimonials come from the Supabase database (js/supabase-config.js),
+// The testimonials come from the site's database (the back end in src/worker.js),
 // where they are added and switched on in the admin page (admin/index.html):
 // only the ones switched on are shown, in the order set there. When there are
 // none, or the database can't be reached, the section stays hidden, except on
@@ -1862,22 +1862,19 @@ function createCursorFollower(options) {
   var here = window.location;
   var ownCopy = here.protocol === 'file:' || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(here.hostname);
   var allowSamples = ownCopy || /[?&]testimonialsPreview(=|&|$)/.test(here.search);
-  var cfg = window.SUPABASE_CONFIG;
   if (!window.TestimonialCard) return;
 
   // the switched-on testimonials, in their order; null if the database can't be
   // reached (or hasn't answered within 8 seconds)
   function fromDatabase() {
-    if (!cfg || !cfg.url || !cfg.key || !window.fetch) return Promise.resolve(null);
-    var url = cfg.url + '/rest/v1/testimonials?select=name,detail,quote,story,rating,photo_path' +
-      '&published=eq.true&order=position.asc,created_at.asc';
-    var options = { headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key } };
+    if (!window.fetch) return Promise.resolve(null);
+    var options = {};
     if (window.AbortController) {
       var stop = new AbortController();
       window.setTimeout(function () { stop.abort(); }, 8000);
       options.signal = stop.signal;
     }
-    return window.fetch(url, options)
+    return window.fetch('/api/testimonials', options)
       .then(function (response) {
         if (!response.ok) throw new Error('HTTP ' + response.status);
         return response.json();
@@ -1890,7 +1887,7 @@ function createCursorFollower(options) {
             quote: r.quote,
             story: r.story,
             rating: r.rating,
-            photo: r.photo_path ? cfg.url + '/storage/v1/object/public/' + cfg.photoBucket + '/' + encodeURIComponent(r.photo_path) : ''
+            photo: r.photo_path ? '/api/photo/' + encodeURIComponent(r.photo_path) : ''
           };
         });
       })
